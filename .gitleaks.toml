@@ -1,0 +1,15 @@
+[extend]
+# Use the default gitleaks rule set
+useDefault = true
+
+[allowlist]
+description = "Placeholder/fake values used in documentation and examples — NOT real secrets."
+regexes = [
+    # Demo placeholders
+    '''DISCORD_TOKEN=tu_token_aqui''',
+    '''OPENROUTER_API_KEY=tu_api_key_de_openrouter''',
+    '''DEEZER_ARL=tu_arl_de_deezer''',
+    '''YOUTUBE_OAUTH_REFRESH_TOKEN=tu_refresh_token_de_youtube''',
+    '''LAVALINK_PASSWORD=your_password_here''',
+    '''LAVALINK_PASSWORD=changeme''',
+]

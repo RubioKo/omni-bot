@@ -1,0 +1,1 @@
+"""Extensiones del bot OmniBot."""

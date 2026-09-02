@@ -1,0 +1,78 @@
+server:
+  port: 2333
+  address: 127.0.0.1
+
+lavalink:
+  plugins:
+    - dependency: "dev.lavalink.youtube:youtube-plugin:1.18.2"
+      repository: "https://maven.lavalink.dev/releases"
+      snapshot: false
+    - dependency: "com.github.topi314.lavasrc:lavasrc-plugin:4.8.3"
+      repository: "https://maven.lavalink.dev/releases"
+      snapshot: false
+  server:
+    password: "${LAVALINK_PASSWORD:changeme}"
+    sources:
+      youtube: false
+      soundcloud: true
+      bandcamp: true
+      http: true
+      local: false
+    filters:
+      volume: true
+      equalizer: true
+      karaoke: false
+      timescale: false
+      tremolo: false
+      vibrato: false
+      distortion: false
+      rotation: false
+      channelMix: false
+      lowPass: false
+    nonAllocatingFrameBuffer: true
+    bufferDurationMs: 500
+    frameBufferDurationMs: 5000
+    opusEncodingQuality: 8
+    resamplingQuality: MEDIUM
+    trackStuckThresholdMs: 10000
+    useSeekGhosting: true
+    youtubePlaylistLoadLimit: 6
+    playerUpdateInterval: 5
+    youtubeSearchEnabled: true
+    soundcloudSearchEnabled: true
+
+plugins:
+  youtube:
+    enabled: true
+    allowSearch: true
+    allowDirectVideoIds: true
+    allowDirectPlaylistIds: true
+    oauth:
+      enabled: true
+      refreshToken: "${YOUTUBE_OAUTH_REFRESH_TOKEN:}"
+    clients:
+      - WEB
+      - WEBEMBEDDED
+      - ANDROID_VR
+      - TVHTML5_SIMPLY
+      - MWEB
+      - IOS
+      - TV
+  lavasrc:
+    providers:
+      - "dzisrc:%ISRC%"
+      - "dzsearch:%QUERY%"
+    sources:
+      spotify: false
+      applemusic: false
+      deezer: true
+      yandexmusic: false
+      flowerytts: false
+      youtube: false
+      vkmusic: false
+      tidal: false
+      qobuz: false
+      jiosaavn: false
+    deezer:
+      masterDecryptionKey: "${DEEZER_MASTER_KEY:}"
+      arl: "${DEEZER_ARL:}"

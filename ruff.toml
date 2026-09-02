@@ -1,0 +1,4 @@
+[lint]
+select = ["E", "F", "W"]
+ignore = ["E501"]
+exclude = [".git", "__pycache__", ".venv", "venv", "data"]

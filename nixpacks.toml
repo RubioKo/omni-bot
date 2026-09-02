@@ -1,0 +1,21 @@
+[phases.setup]
+nixPkgs = ["python3", "gcc", "ffmpeg", "libopus", "temurin-bin-17", "curl"]
+
+[phases.build]
+cmds = [
+    "mkdir -p /app/lavalink/plugins && cd /app/lavalink && curl -fsSL -o Lavalink.jar https://github.com/lavalink-devs/Lavalink/releases/download/4.2.2/Lavalink.jar && echo \"Lavalink.jar downloaded: $(sha256sum Lavalink.jar | cut -d' ' -f1)\" && test -s Lavalink.jar || (echo 'Lavalink.jar download failed or empty' && exit 1)",
+    "cp /app/.application.yml.example /app/lavalink/application.yml 2>/dev/null || true"
+]
+
+[phases.install]
+cmds = ["curl -LsSf https://astral.sh/uv/install.sh | sh && export PATH=\"$HOME/.local/bin:$PATH\" && uv venv /opt/venv && . /opt/venv/bin/activate && uv sync --frozen --no-dev"]
+
+[healthcheck]
+cmd = "curl -sf http://127.0.0.1:8080/health"
+interval = "30s"
+timeout = "10s"
+retries = 3
+start_period = "60s"
+
+[start]
+cmd = "cd /app/lavalink && java -Xms64m -Xmx256m -jar Lavalink.jar & PID=$!; AUTH=\"Authorization: ${LAVALINK_PASSWORD:-changeme}\"; for i in $(seq 1 30); do curl -sf -H \"$AUTH\" http://127.0.0.1:2333/version > /dev/null 2>&1 && break; sleep 2; done; if ! curl -sf -H \"$AUTH\" http://127.0.0.1:2333/version > /dev/null 2>&1; then echo 'Lavalink failed to start'; kill $PID 2>/dev/null; exit 1; fi; . /opt/venv/bin/activate && cd /app && python -m src.main"
