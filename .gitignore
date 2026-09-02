@@ -1,0 +1,50 @@
+# Environment variables
+.env
+.env.*
+!.env.example
+
+# Lavalink config (contains secrets)
+application.yml
+
+# Database
+data/
+*.db
+*.sqlite
+*.sqlite3
+
+# Lavalink runtime (local downloads)
+lavalink/
+*.jar
+*.keystore
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg-info/
+dist/
+build/
+eggs/
+*.egg
+.pytest_cache/
+.ruff_cache/
+.coverage
+
+# Virtual environments
+venv/
+.venv/
+env/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log

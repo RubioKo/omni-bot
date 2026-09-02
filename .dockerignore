@@ -1,0 +1,12 @@
+.git/
+docs/
+data/
+*.md
+.env
+.env.example
+.application.yml.example
+.vscode/
+.idea/
+__pycache__/
+*.pyc
+*.log

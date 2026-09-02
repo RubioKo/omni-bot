@@ -1,0 +1,53 @@
+[project]
+name = "omnibot"
+version = "2.4.2"
+description = "OmniBot - Discord bot todo-en-uno para comunidades"
+readme = "README.md"
+license = "AGPL-3.0-only"
+requires-python = ">=3.11"
+authors = [
+    { name = "RubioKo" },
+]
+
+dependencies = [
+    "discord.py==2.7.1",
+    "fastapi>=0.115.0",
+    "httpx==0.28.1",
+    "python-dotenv==1.2.3",
+    "openai==3.5.0",
+    "PyNaCl==1.6.2",
+    "uvicorn>=0.34.0",
+    "wavelink==3.5.2",
+    "aiosqlite==0.22.1",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pre-commit>=4.0.0",
+    "pytest==9.1.1",
+    "pytest-asyncio==1.4.0",
+    "pytest-cov==7.1.0",
+    "pyright>=1.1.411",
+    "ruff==0.16.5",
+]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 120
+
+[tool.ruff.lint]
+select = ["E", "F", "W"]
+ignore = ["E501"]
+
+[tool.ruff.lint.per-file-ignores]
+"__init__.py" = ["F401"]
+
+[tool.pytest.ini_options]
+asyncio_default_fixture_loop_scope = "function"
+testpaths = ["tests"]
+
+[tool.pyright]
+typeCheckingMode = "off"
+reportMissingImports = true
+reportMissingTypeStubs = false
+pythonVersion = "3.12"
