@@ -3,6 +3,9 @@ from discord import app_commands
 from discord.ext import commands
 import logging
 
+from ..services.permissions import permission_manager, PermissionLevel
+from ..services import database as db
+
 logger = logging.getLogger("OmniBot.setup")
 
 OWNER_ROLE_NAMES = {"PROPIETARIO", "G/M", "ADMINISTRADOR", "MODERADOR"}
@@ -41,10 +44,14 @@ class SetupCog(commands.Cog):
 
     async def _is_owner(self, interaction: discord.Interaction) -> bool:
         if interaction.user.id != interaction.guild.owner_id:
-            await interaction.followup.send("Solo el PROPIETARIO puede usar este comando.")
+            if interaction.response.is_done():
+                await interaction.followup.send("Solo el PROPIETARIO puede usar este comando.", ephemeral=True)
+            else:
+                await interaction.response.send_message("Solo el PROPIETARIO puede usar este comando.", ephemeral=True)
             return False
         return True
 
+    @app_commands.guild_only()
     @app_commands.command(name="nuke-all", description="Destruir estructura del servidor")
     async def nuke_all(self, interaction: discord.Interaction):
         if not await self._is_owner(interaction):
@@ -73,6 +80,9 @@ class SetupCog(commands.Cog):
 
         if not view.confirmed:
             await interaction.edit_original_response(content="Cancelado.", embed=None)
+            return
+
+        if not await self._is_owner(interaction):
             return
 
         deleted_ch = 0
@@ -109,7 +119,8 @@ class SetupCog(commands.Cog):
             )
         )
 
-    @app_commands.command(name="deploy", description="Construir estructura del servidor")
+    @app_commands.guild_only()
+    @app_commands.command(name="deploy", description="Crear estructura conservando canales existentes")
     async def deploy(self, interaction: discord.Interaction):
         if not await self._is_owner(interaction):
             return
@@ -118,7 +129,7 @@ class SetupCog(commands.Cog):
         embed = discord.Embed(
             title="CONSTRUIR SERVIDOR",
             description=(
-                "Nueva estructura optimizada:\n"
+                "Instalación segura: conserva canales, mensajes y roles existentes.\n\nEstructura:\n"
                 "- 6 categorias\n"
                 "- ~20 canales\n"
                 "- 14 roles\n"
@@ -156,13 +167,18 @@ class SetupCog(commands.Cog):
             ("🏆 VIP", 0xFFD700),
         ]
 
+        if not await self._is_owner(interaction):
+            return
+
         created_roles = {}
+        new_role_ids = set()
         for role_name, color in roles_to_create:
             existing = discord.utils.get(guild.roles, name=role_name) or created_roles.get(role_name)
             if not existing:
                 try:
                     role = await guild.create_role(name=role_name, color=discord.Color(color))
                     created_roles[role_name] = role
+                    new_role_ids.add(role.id)
                 except Exception as e:
                     logger.error(f"Error creating {role_name}: {e}")
             else:
@@ -275,6 +291,7 @@ class SetupCog(commands.Cog):
 
         created_channels = 0
         channel_map = {}
+        new_channel_ids = set()
 
         for cat_config in categories:
             cat = discord.utils.get(guild.categories, name=cat_config["name"])
@@ -284,39 +301,24 @@ class SetupCog(commands.Cog):
                 except Exception as e:
                     logger.error(f"Error creating {cat_config['name']}: {e}")
                     continue
-            else:
-                for ch in cat.channels:
-                    try:
-                        await ch.delete()
-                    except Exception:
-                        pass
-
-            for role, perms in cat_config.get("base_perms", {}).items():
-                if role:
-                    try:
+                for role, perms in cat_config.get("base_perms", {}).items():
+                    if role:
                         await cat.set_permissions(role, overwrite=perms)
-                    except Exception as e:
-                        logger.error(f"Perms error {role} in {cat.name}: {e}")
-
-            for staff_name in cat_config.get("staff_roles", []):
-                staff_role = created_roles.get(staff_name) or discord.utils.get(guild.roles, name=staff_name)
-                if staff_role:
-                    try:
+                for staff_name in cat_config.get("staff_roles", []):
+                    staff_role = created_roles.get(staff_name) or discord.utils.get(guild.roles, name=staff_name)
+                    if staff_role:
                         await cat.set_permissions(staff_role, overwrite=public)
-                    except Exception as e:
-                        logger.error(f"Staff perms error: {e}")
 
             for ch_name, ch_type, ch_topic in cat_config.get("channels", []):
-                existing = discord.utils.get(guild.channels, name=ch_name)
+                existing = discord.utils.get(cat.channels, name=ch_name)
                 if existing:
-                    try:
-                        await existing.delete()
-                    except Exception:
-                        pass
+                    channel_map[ch_name] = existing
+                    continue
                 try:
                     ch = await guild.create_text_channel(ch_name, category=cat, topic=ch_topic)
                     channel_map[ch_name] = ch
                     created_channels += 1
+                    new_channel_ids.add(ch.id)
                     if ch_name in ["reglas", "roles"]:
                         await ch.set_permissions(everyone, overwrite=read_only)
                 except Exception as e:
@@ -327,19 +329,17 @@ class SetupCog(commands.Cog):
                 if game_role:
                     for gch_name in game_chs:
                         gch = channel_map.get(gch_name)
-                        if gch:
+                        if gch and gch.id in new_channel_ids:
                             try:
                                 await gch.set_permissions(game_role, overwrite=public)
                             except Exception as e:
                                 logger.error(f"Error setting {role_name} perms on {gch_name}: {e}")
 
             for ch_name, ch_topic in cat_config.get("announcements", []):
-                existing = discord.utils.get(guild.channels, name=ch_name)
+                existing = discord.utils.get(cat.channels, name=ch_name)
                 if existing:
-                    try:
-                        await existing.delete()
-                    except Exception:
-                        pass
+                    channel_map[ch_name] = existing
+                    continue
                 try:
                     ch = await guild.create_text_channel(
                         ch_name, category=cat, topic=ch_topic,
@@ -347,38 +347,37 @@ class SetupCog(commands.Cog):
                     )
                     channel_map[ch_name] = ch
                     created_channels += 1
+                    new_channel_ids.add(ch.id)
                     await ch.set_permissions(everyone, overwrite=read_only)
                 except Exception as e:
                     logger.error(f"Error creating {ch_name}: {e}")
 
             for vc_name in cat_config.get("voice_channels", []):
                 prefixed = f"🔊 {vc_name}" if not vc_name.startswith("🔊") else vc_name
-                existing = discord.utils.get(guild.channels, name=prefixed)
+                existing = discord.utils.get(cat.channels, name=prefixed)
                 if existing:
-                    try:
-                        await existing.delete()
-                    except Exception:
-                        pass
+                    channel_map[vc_name] = existing
+                    continue
                 try:
                     ch = await guild.create_voice_channel(prefixed, category=cat)
                     channel_map[vc_name] = ch
                     created_channels += 1
+                    new_channel_ids.add(ch.id)
                 except Exception as e:
                     logger.error(f"Error creating VC {vc_name}: {e}")
 
             for forum_name, forum_topic in cat_config.get("forum_channels", []):
-                existing = discord.utils.get(guild.channels, name=forum_name)
+                existing = discord.utils.get(cat.channels, name=forum_name)
                 if existing:
-                    try:
-                        await existing.delete()
-                    except Exception:
-                        pass
+                    channel_map[forum_name] = existing
+                    continue
                 try:
                     ch = await guild.create_forum_channel(
                         forum_name, category=cat, topic=forum_topic,
                     )
                     channel_map[forum_name] = ch
                     created_channels += 1
+                    new_channel_ids.add(ch.id)
                     await ch.set_permissions(miembro, overwrite=public)
                 except Exception as e:
                     logger.error(f"Error creating forum {forum_name}: {e}")
@@ -386,7 +385,7 @@ class SetupCog(commands.Cog):
         await interaction.edit_original_response(content=f"{created_channels} canales creados. Publicando contenido...")
 
         reglas_ch = channel_map.get("reglas")
-        if reglas_ch:
+        if reglas_ch and reglas_ch.id in new_channel_ids:
             try:
                 from ..services.rules import build_rules_embed
                 embed = build_rules_embed(title="REGLAS DEL SERVIDOR")
@@ -395,7 +394,7 @@ class SetupCog(commands.Cog):
                 logger.error(f"Error posting rules: {e}")
 
         roles_ch = channel_map.get("roles")
-        if roles_ch:
+        if roles_ch and roles_ch.id in new_channel_ids:
             try:
                 from ..cogs.roles import setup_role_channel
                 await setup_role_channel(self.bot, roles_ch)
@@ -403,7 +402,7 @@ class SetupCog(commands.Cog):
                 logger.error(f"Error setting roles: {e}")
 
         anuncios_ch = channel_map.get("anuncios")
-        if anuncios_ch:
+        if anuncios_ch and anuncios_ch.id in new_channel_ids:
             try:
                 await anuncios_ch.send(embed=discord.Embed(
                     title="ANUNCIOS",
@@ -429,14 +428,14 @@ class SetupCog(commands.Cog):
 
         for ch_name, (title, desc, color) in game_content.items():
             ch = channel_map.get(ch_name)
-            if ch:
+            if ch and ch.id in new_channel_ids:
                 try:
                     await ch.send(embed=discord.Embed(title=title, description=desc, color=discord.Color(color)))
                 except Exception as e:
                     logger.error(f"Error posting to {ch_name}: {e}")
 
         lfg_ch = channel_map.get("lfg")
-        if lfg_ch:
+        if lfg_ch and lfg_ch.id in new_channel_ids:
             try:
                 await lfg_ch.send(embed=discord.Embed(
                     title="LOOKING FOR GROUP",
@@ -450,6 +449,11 @@ class SetupCog(commands.Cog):
             except Exception as e:
                 logger.error(f"Error posting LFG: {e}")
 
+        for name, level in (("DJ", PermissionLevel.DJ), ("🏆 VIP", PermissionLevel.VIP), ("🛡️ Staff Helper", PermissionLevel.MODERATOR)):
+            role = created_roles.get(name)
+            if role and role.id in new_role_ids:
+                await permission_manager.bind_role(guild.id, role.id, level)
+        await db.log_mod_action(guild.id, "SAFE_DEPLOY", interaction.user.id, f"Creados {created_channels} canales; canales existentes conservados", guild_id=guild.id)
         await interaction.edit_original_response(content=(
             f"**SERVIDOR DESPLEGADO**\n"
             f"Categorias: 6 | Canales: {created_channels} | Roles: {len(created_roles)}\n"
@@ -458,6 +462,7 @@ class SetupCog(commands.Cog):
             f"Verifica con `/server-map`"
         ))
 
+    @app_commands.guild_only()
     @app_commands.command(name="server-map", description="Ver mapa completo del servidor")
     async def server_map(self, interaction: discord.Interaction):
         if not await self._is_owner(interaction):
@@ -502,6 +507,7 @@ class SetupCog(commands.Cog):
             else:
                 await interaction.followup.send(chunk)
 
+    @app_commands.guild_only()
     @app_commands.command(name="restart-bot", description="Reiniciar el bot")
     async def restart_bot(self, interaction: discord.Interaction):
         if not await self._is_owner(interaction):
@@ -509,11 +515,32 @@ class SetupCog(commands.Cog):
         await interaction.response.send_message("Reiniciando...")
         await self.bot.close()
 
+    @app_commands.guild_only()
+    @app_commands.command(name="staffrole", description="Asignar nivel a un rol por ID (solo propietario)")
+    @app_commands.choices(level=[app_commands.Choice(name=n, value=int(v)) for n, v in (
+        ("Quitar acceso", PermissionLevel.MEMBER), ("DJ", PermissionLevel.DJ),
+        ("VIP", PermissionLevel.VIP), ("Moderador", PermissionLevel.MODERATOR), ("Administrador", PermissionLevel.ADMIN),
+    )])
+    async def staffrole(self, interaction: discord.Interaction, role: discord.Role, level: app_commands.Choice[int]):
+        if not await self._is_owner(interaction):
+            return
+        if role.is_default() or role.managed:
+            await interaction.response.send_message("No puedes configurar @everyone ni roles administrados.", ephemeral=True)
+            return
+        await interaction.response.defer(ephemeral=True)
+        await permission_manager.bind_role(interaction.guild.id, role.id, PermissionLevel(level.value))
+        await db.log_mod_action(role.id, "ROLE_PERMISSION", interaction.user.id, f"Nivel {level.name}", guild_id=interaction.guild.id)
+        await interaction.followup.send(f"Nivel de {role.mention}: {level.name}.")
+
+    @app_commands.guild_only()
     @app_commands.command(name="repostroles", description="Republicar menus de roles en #roles")
     async def repostroles(self, interaction: discord.Interaction):
+        if not await self._is_owner(interaction):
+            return
+        await interaction.response.defer(ephemeral=True)
         roles_ch = discord.utils.get(interaction.guild.channels, name="roles")
         if not roles_ch:
-            await interaction.response.send_message("No encontre el canal #roles.")
+            await interaction.followup.send("No encontre el canal #roles.")
             return
 
         async for msg in roles_ch.history(limit=50):
@@ -522,7 +549,8 @@ class SetupCog(commands.Cog):
 
         from ..cogs.roles import setup_role_channel
         await setup_role_channel(self.bot, roles_ch)
-        await interaction.response.send_message("Menus de roles republicados en #roles.")
+        await db.log_mod_action(roles_ch.id, "REPOST_ROLES", interaction.user.id, "Panel de roles republicado", guild_id=interaction.guild.id)
+        await interaction.followup.send("Menus de roles republicados en #roles.")
 
 
 async def setup(bot):

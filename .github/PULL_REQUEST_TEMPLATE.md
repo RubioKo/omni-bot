@@ -16,7 +16,7 @@ Describí el cambio que hacés y por qué.
 
 - [ ] `uv run ruff check src/ tests/` pasa
 - [ ] `uv run pyright src/` pasa
-- [ ] `uv run pytest -v` pasa (181 tests)
+- [ ] `uv run pytest -v` pasa
 - [ ] `pre-commit` pasa (incluye gitleaks)
 
 ## Checklist de open source

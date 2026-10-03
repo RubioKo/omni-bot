@@ -12,11 +12,9 @@ def resolve_member(guild: discord.Guild, user_str: str) -> discord.Member | None
     if not target:
         return None
 
-    match = re.search(r"<@!?(\d+)>", target)
-    if match:
-        member = guild.get_member(int(match.group(1)))
-        if member:
-            return member
+    match = re.fullmatch(r"<@!?(\d+)>", target)
+    if match or target.isdigit():
+        return guild.get_member(int(match.group(1) if match else target))
 
     lowered = target.lower()
 
@@ -24,18 +22,15 @@ def resolve_member(guild: discord.Guild, user_str: str) -> discord.Member | None
         m for m in guild.members
         if m.name.lower() == lowered or (m.nick and m.nick.lower() == lowered)
     ]
-    if len(exact) == 1:
-        return exact[0]
+    if exact:
+        return exact[0] if len(exact) == 1 else None
 
     prefix = [
         m for m in guild.members
         if m.name.lower().startswith(lowered) or (m.nick and m.nick.lower().startswith(lowered))
     ]
-    if len(prefix) == 1:
-        return prefix[0]
+    if prefix:
+        return prefix[0] if len(prefix) == 1 else None
 
-    for m in guild.members:
-        if lowered in m.name.lower() or (m.nick and lowered in m.nick.lower()):
-            return m
-
-    return None
+    matches = [m for m in guild.members if lowered in m.name.lower() or (m.nick and lowered in m.nick.lower())]
+    return matches[0] if len(matches) == 1 else None

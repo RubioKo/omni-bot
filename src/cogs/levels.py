@@ -33,11 +33,14 @@ class LevelsCog(commands.Cog):
 
     @commands.Cog.listener()
     async def on_message(self, message):
+        ready = getattr(self.bot, "_data_ready", None)
+        if ready is not None and not ready.is_set():
+            return
         if message.author.bot or message.guild is None:
             return
 
         xp_amount = random.randint(15, 25)
-        result = await db.add_xp(message.author.id, xp_amount)
+        result = await db.add_xp(message.author.id, xp_amount, guild_id=message.guild.id)
 
         if result["gained"] and result["leveled_up"]:
             await self._announce_level(message, result)
@@ -48,34 +51,36 @@ class LevelsCog(commands.Cog):
             return
 
         if before.channel is None and after.channel is not None:
-            self._voice_sessions[member.id] = time.time()
+            self._voice_sessions[(member.guild.id, member.id)] = time.time()
 
         elif before.channel is not None and after.channel is None:
-            if member.id in self._voice_sessions:
-                self._voice_sessions.pop(member.id)
+            if (member.guild.id, member.id) in self._voice_sessions:
+                self._voice_sessions.pop((member.guild.id, member.id))
 
     @tasks.loop(seconds=VOICE_XP_INTERVAL)
     async def voice_xp_loop(self):
         try:
-            for member_id, start in list(self._voice_sessions.items()):
+            for (guild_id, member_id), start in list(self._voice_sessions.items()):
                 elapsed = time.time() - start
                 if elapsed < VOICE_XP_INTERVAL:
                     continue
                 for guild in self.bot.guilds:
+                    if guild.id != guild_id:
+                        continue
                     member = guild.get_member(member_id)
                     if member and member.voice and member.voice.channel:
-                        result = await db.add_voice_xp(member_id, VOICE_XP_AMOUNT)
+                        result = await db.add_voice_xp(member_id, VOICE_XP_AMOUNT, guild_id=guild_id)
                         if result.get("leveled_up"):
                             await self._announce_voice_level(member, result)
                         break
-                self._voice_sessions[member_id] = time.time()
+                self._voice_sessions[(guild_id, member_id)] = time.time()
         except Exception as e:
             logger.error(f"Voice XP loop error: {e}", exc_info=True)
             await self.bot.report_task_error("voice_xp_loop", e)
 
     @voice_xp_loop.before_loop
     async def before_voice_xp_loop(self):
-        await self.bot.wait_until_ready()
+        await self.bot.wait_until_data_ready()
 
     async def _announce_voice_level(self, member, result):
         channel = member.guild.system_channel
@@ -150,12 +155,13 @@ class LevelsCog(commands.Cog):
                     except discord.Forbidden:
                         pass
 
+    @app_commands.guild_only()
     @app_commands.command(name="rank", description="Ver tu nivel y XP")
     @app_commands.describe(member="Usuario a consultar (opcional)")
     async def rank_cmd(self, interaction: discord.Interaction, member: discord.Member = None):
         member = member or interaction.user
-        data = await db.get_level(member.id)
-        pos = await db.get_user_rank_position(member.id)
+        data = await db.get_level(member.id, guild_id=interaction.guild.id)
+        pos = await db.get_user_rank_position(member.id, guild_id=interaction.guild.id)
 
         xp_needed = (data["level"] + 1) ** 2 * 100
 
@@ -178,9 +184,10 @@ class LevelsCog(commands.Cog):
 
         await interaction.response.send_message(embed=embed)
 
+    @app_commands.guild_only()
     @app_commands.command(name="top", description="Top 10 del servidor")
     async def leaderboard_cmd(self, interaction: discord.Interaction):
-        top = await db.get_leaderboard(10)
+        top = await db.get_leaderboard(10, guild_id=interaction.guild.id)
         if not top:
             await interaction.response.send_message("No hay datos de niveles aún.")
             return
@@ -196,6 +203,7 @@ class LevelsCog(commands.Cog):
 
         await interaction.response.send_message("\n".join(lines))
 
+    @app_commands.guild_only()
     @app_commands.command(name="xplb", description="Reinicializar la base de datos (solo propietario)")
     async def xplb_cmd(self, interaction: discord.Interaction):
         if interaction.user.id != interaction.guild.owner_id:

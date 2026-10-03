@@ -1,3 +1,6 @@
+import json
+from datetime import datetime, timezone
+
 import discord
 from discord import app_commands
 from discord.ext import commands, tasks
@@ -27,6 +30,7 @@ class CommunityCog(commands.Cog):
         self.check_giveaways.cancel()
         self.check_reminders.cancel()
 
+    @app_commands.guild_only()
     @app_commands.command(name="poll", description="Crear una encuesta con opciones")
     @app_commands.describe(pregunta="La pregunta", opciones="Opciones separadas por comas (max 10)")
     async def poll_cmd(self, interaction: discord.Interaction, pregunta: str, *, opciones: str):
@@ -52,9 +56,10 @@ class CommunityCog(commands.Cog):
             except Exception:
                 pass
 
+    @app_commands.guild_only()
     @app_commands.command(name="giveaway", description="Iniciar un sorteo (MOD+)")
     @app_commands.describe(premio="Que se sortea", duracion="Ej: 1h, 30m, 2d", ganadores="Cuantos ganan (default 1)")
-    async def giveaway_cmd(self, interaction: discord.Interaction, premio: str, duracion: str, ganadores: int = 1):
+    async def giveaway_cmd(self, interaction: discord.Interaction, premio: app_commands.Range[str, 1, 200], duracion: str, ganadores: int = 1):
         if not permission_manager.has_permission(interaction.user, "warn_user"):
             await interaction.response.send_message("Solo **MODERADOR** o superior puede usar este comando.")
             return
@@ -93,16 +98,17 @@ class CommunityCog(commands.Cog):
             logger.error(f"No se pudo añadir la reacción al sorteo {gid}: {e}")
         await db.update_giveaway_message(gid, msg.id)
 
+    @app_commands.guild_only()
     @app_commands.command(name="remind", description="Programar un recordatorio")
     @app_commands.describe(tiempo="Ej: 10m, 2h, 1d", mensaje="Que quieres recordar")
-    async def remind_cmd(self, interaction: discord.Interaction, tiempo: str, *, mensaje: str):
+    async def remind_cmd(self, interaction: discord.Interaction, tiempo: str, *, mensaje: app_commands.Range[str, 1, 1500]):
         seconds = parse_duration(tiempo)
         if seconds < 30 or seconds > 2592000:
             await interaction.response.send_message("Tiempo invalido. Debe ser entre 30 segundos y 30 dias. Ej: 10m, 2h, 1d")
             return
 
         remind_at = time.time() + seconds
-        await db.create_reminder(interaction.user.id, interaction.channel.id, mensaje, remind_at)
+        await db.create_reminder(interaction.user.id, interaction.channel.id, mensaje, remind_at, guild_id=interaction.guild.id)
 
         ts = f"<t:{int(remind_at)}:R>"
         await interaction.response.send_message(f"Te avisare {ts}: {mensaje}", ephemeral=True)
@@ -115,58 +121,40 @@ class CommunityCog(commands.Cog):
             logger.error(f"Giveaway loop error: {e}", exc_info=True)
             await self.bot.report_task_error("check_giveaways", e)
 
+    async def _send_delivery(self, channel, marker, content, due_at, user_ids):
+        after = datetime.fromtimestamp(due_at, tz=timezone.utc)
+        async for message in channel.history(limit=None, after=after):
+            if message.author.id == self.bot.user.id and any(e.footer.text == marker for e in message.embeds):
+                return
+        embed = discord.Embed(description=content, color=0x57F287)
+        embed.set_footer(text=marker)
+        await channel.send(embed=embed, allowed_mentions=discord.AllowedMentions(
+            everyone=False, roles=False, users=[discord.Object(id=uid) for uid in user_ids],
+        ))
+
     async def _check_giveaways(self):
-        gaws = await db.get_active_giveaways()
-        for gw in gaws:
-            guild = self.bot.get_guild(gw["guild_id"])
-            if not guild:
-                continue
-            channel = guild.get_channel(gw["channel_id"])
-            if not channel:
-                continue
-
-            await db.end_giveaway(gw["id"])
-
+        for gw in await db.get_active_giveaways():
             try:
-                msg = await channel.fetch_message(gw["message_id"])
-            except Exception:
-                continue
-
-            reaction = None
-            for r in msg.reactions:
-                if str(r.emoji) == GIVEAWAY_EMOJI:
-                    reaction = r
-                    break
-
-            if not reaction:
-                try:
-                    await channel.send(f"{GIVEAWAY_EMOJI} **Sorteo terminado:** {gw['prize']}\nNo hubo participantes.")
-                except discord.Forbidden:
-                    pass
-                continue
-
-            users = [u async for u in reaction.users() if not u.bot]
-            if not users:
-                try:
-                    await channel.send(f"{GIVEAWAY_EMOJI} **Sorteo terminado:** {gw['prize']}\nNo hubo participantes.")
-                except discord.Forbidden:
-                    pass
-                continue
-
-            w_count = min(gw["winners"], len(users))
-            winners = random.sample(users, w_count)
-            winner_mentions = ", ".join(w.mention for w in winners)
-
-            try:
-                await channel.send(
-                    f"{GIVEAWAY_EMOJI} **SORTEO FINALIZADO** {GIVEAWAY_EMOJI}\n\n"
-                    f"Premio: **{gw['prize']}**\n"
-                    f"Ganador(es): {winner_mentions}\n"
-                    f"Participantes: {len(users)}\n\n"
-                    f"Organizado por <@{gw['created_by']}>"
-                )
-            except discord.Forbidden:
-                logger.warning(f"Giveaway {gw['id']} ended but could not announce in #{channel}")
+                guild = self.bot.get_guild(gw["guild_id"])
+                channel = guild.get_channel(gw["channel_id"]) if guild else None
+                if channel is None:
+                    raise RuntimeError("Canal de sorteo no disponible")
+                if gw["result"] is None:
+                    message = await channel.fetch_message(gw["message_id"])
+                    reaction = next((r for r in message.reactions if str(r.emoji) == GIVEAWAY_EMOJI), None)
+                    users = [u async for u in reaction.users() if not u.bot] if reaction else []
+                    winners = random.sample(users, min(gw["winners"], len(users)))
+                    winner_ids = await db.save_giveaway_result(gw["id"], [u.id for u in winners])
+                else:
+                    winner_ids = json.loads(gw["result"])
+                winner_text = ", ".join(f"<@{uid}>" for uid in winner_ids) or "No hubo participantes."
+                content = f"🎉 **SORTEO FINALIZADO**\nPremio: **{gw['prize']}**\nGanador(es): {winner_text}\nOrganizado por <@{gw['created_by']}>"
+                await self._send_delivery(channel, f"omnibot:giveaway:{gw['guild_id']}:{gw['id']}", content, gw["ends_at"], winner_ids)
+                await db.end_giveaway(gw["id"])
+            except Exception as error:
+                logger.exception("Sorteo %s pendiente de reintento", gw["id"])
+                await db.retry_delivery("giveaways", gw["id"], type(error).__name__)
+                await self.bot.report_task_error("check_giveaways", error)
 
     @tasks.loop(seconds=30)
     async def check_reminders(self):
@@ -177,25 +165,29 @@ class CommunityCog(commands.Cog):
             await self.bot.report_task_error("check_reminders", e)
 
     async def _check_reminders(self):
-        reminders = await db.get_due_reminders()
-        for r in reminders:
+        for reminder in await db.get_due_reminders():
             try:
-                channel = self.bot.get_channel(r["channel_id"])
-                if channel:
-                    user = self.bot.get_user(r["user_id"])
-                    name = user.mention if user else f"<@{r['user_id']}>"
-                    await channel.send(f"{name} recordatorio: {r['message']}")
-            except Exception:
-                pass
-            await db.delete_reminder(r["id"])
+                channel = self.bot.get_channel(reminder["channel_id"])
+                if channel is None or channel.guild.id != reminder["guild_id"]:
+                    raise RuntimeError("Canal de recordatorio no disponible")
+                await self._send_delivery(
+                    channel, f"omnibot:reminder:{reminder['guild_id']}:{reminder['id']}",
+                    f"<@{reminder['user_id']}> recordatorio: {reminder['message']}",
+                    reminder["remind_at"], [reminder["user_id"]],
+                )
+                await db.delete_reminder(reminder["id"])
+            except Exception as error:
+                logger.exception("Recordatorio %s pendiente de reintento", reminder["id"])
+                await db.retry_delivery("reminders", reminder["id"], type(error).__name__)
+                await self.bot.report_task_error("check_reminders", error)
 
     @check_giveaways.before_loop
     async def before_giveaways(self):
-        await self.bot.wait_until_ready()
+        await self.bot.wait_until_data_ready()
 
     @check_reminders.before_loop
     async def before_reminders(self):
-        await self.bot.wait_until_ready()
+        await self.bot.wait_until_data_ready()
 
 
 async def setup(bot):

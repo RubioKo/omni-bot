@@ -28,10 +28,10 @@ jobs:
         run: uv sync --frozen --extra dev
 
       - name: Syntax check
-        run: python -m compileall -q src/ tests/
+        run: uv run python -m compileall -q src/ tests/
 
       - name: Import smoke test
-        run: python -c "import src.main"
+        run: uv run python -c "import src.main"
 
       - name: Ruff check
         run: uv run ruff check src/ tests/
@@ -63,16 +63,7 @@ jobs:
         run: uv sync --frozen --extra dev
 
       - name: Tests with coverage
-        run: |
-          set +e
-          timeout 30 uv run pytest -v --tb=short --cov=src --cov-report=xml --cov-report=term-missing
-          RC=$?
-          set -e
-          if [ $RC -eq 124 ]; then
-            echo "::notice::All tests passed (exit code 124 = discord.py/audioop cleanup hang)"
-            exit 0
-          fi
-          exit $RC
+        run: timeout 180 uv run pytest -v --tb=short --cov=src --cov-report=xml --cov-report=term-missing
 
       - name: Upload coverage
         if: matrix.python-version == '3.12' && always()

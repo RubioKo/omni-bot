@@ -13,21 +13,18 @@ def test_missing_required_field():
     assert "user" in err
 
 
-def test_unknown_tool_passes():
+def test_unknown_tool_rejected():
     ok, err = validate_tool_params("nonexistent_tool", {})
-    assert ok is True
+    assert ok is False
 
 
-def test_count_clamped_and_coerced():
-    params = {"count": "500"}
+def test_count_rejects_invalid_values():
+    for value in ("500", "abc", -1, 0, True, 1.5):
+        ok, _ = validate_tool_params("clear_messages", {"count": value})
+        assert ok is False
+    params = {"count": "50"}
     ok, _ = validate_tool_params("clear_messages", params)
-    assert ok is True
-    assert params["count"] == 100
-
-    params = {"count": "abc"}
-    ok, _ = validate_tool_params("clear_messages", params)
-    assert ok is True
-    assert params["count"] == 10
+    assert ok and params["count"] == 50
 
 
 def test_seconds_validation():

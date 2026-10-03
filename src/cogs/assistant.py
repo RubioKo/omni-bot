@@ -8,6 +8,7 @@ import logging
 from ..services.brain import brain
 from ..services.permissions import permission_manager
 from ..tools.moderation import warn_user, mute_user, unmute_user, clear_messages, set_slowmode
+from ..tools.moderation import prepare_action
 from ..tools.info import get_server_stats, get_user_info
 
 logger = logging.getLogger("OmniBot.assistant")
@@ -45,6 +46,12 @@ def build_confirmation_text(tools: list) -> str:
         desc = f"{i}. {name} a {user_str}" if user_str else f"{i}. {name}"
         if duration:
             desc += f" por {duration}"
+        if "count" in t["params"]:
+            desc += f" · {t['params']['count']} mensajes"
+        if "seconds" in t["params"]:
+            desc += f" · {t['params']['seconds']} segundos"
+        if "channel" in t["params"]:
+            desc += f" · canal {t['params']['channel']}"
         if reason:
             desc += f" — {reason}"
         lines.append(desc)
@@ -54,7 +61,7 @@ def build_confirmation_text(tools: list) -> str:
 class MultiConfirmView(discord.ui.View):
     def __init__(self, tools, user, user_message, level_name, original_message=None):
         super().__init__(timeout=CONFIRMATION_TIMEOUT)
-        self.tools = tools
+        self.tools = [{"tool": t["tool"], "params": dict(t["params"])} for t in tools]
         self.user = user
         self.user_message = user_message
         self.level_name = level_name
@@ -82,10 +89,18 @@ class MultiConfirmView(discord.ui.View):
         if self._done:
             return
         self._done = True
-        await interaction.response.send_message("⏳ Ejecutando...", ephemeral=True)
+        await interaction.response.defer(ephemeral=True, thinking=True)
 
         results = []
         target_message = self.original_message or self.reply_message
+        for t in self.tools:
+            if t["tool"] in DESTRUCTIVE_TOOLS:
+                _, _, _, error = await prepare_action(target_message, t["tool"], t["params"])
+                if error:
+                    await interaction.edit_original_response(content=f"Acción cancelada: {error}")
+                    self.stop()
+                    await self._disable_buttons()
+                    return
         for t in self.tools:
             tool_name = t["tool"]
             try:
@@ -140,28 +155,34 @@ TOOL_PARAM_SCHEMAS = {
 
 def validate_tool_params(tool_name, params):
     schema = TOOL_PARAM_SCHEMAS.get(tool_name)
-    if not schema:
-        return True, ""
+    if not schema or not isinstance(params, dict):
+        return False, "Herramienta o parámetros inválidos."
     for field in schema["required"]:
         if field not in params or not params[field]:
             return False, f"Falta el campo requerido: `{field}`"
     if "count" in params:
         try:
-            params["count"] = min(int(params["count"]), 100)
+            value = int(params["count"])
+            if isinstance(params["count"], (bool, float)) or not 1 <= value <= 100:
+                return False, "La cantidad debe ser entre 1 y 100."
+            params["count"] = value
         except (ValueError, TypeError):
-            params["count"] = 10
+            return False, "Cantidad inválida."
     if "seconds" in params:
         try:
             val = int(params["seconds"])
-            if val < 0 or val > 21600:
+            if isinstance(params["seconds"], (bool, float)) or val < 0 or val > 21600:
                 return False, "El slowmode debe ser entre 0 y 21600 segundos."
             params["seconds"] = val
         except (ValueError, TypeError):
             return False, "Valor inválido para `seconds`."
+    for field in ("user", "reason", "duration", "channel"):
+        if field in params and not isinstance(params[field], str):
+            return False, f"Valor inválido para `{field}`."
     return True, ""
 
 
-DESTRUCTIVE_TOOLS = {"warn_user", "mute_user", "clear_messages"}
+DESTRUCTIVE_TOOLS = {"warn_user", "mute_user", "unmute_user", "clear_messages", "set_slowmode"}
 
 
 class AssistantCog(commands.Cog):
@@ -186,6 +207,9 @@ class AssistantCog(commands.Cog):
 
     @commands.Cog.listener()
     async def on_message(self, message):
+        ready = getattr(self.bot, "_data_ready", None)
+        if ready is not None and not ready.is_set():
+            return
         if message.author.bot:
             return
         if message.guild is None:
@@ -209,7 +233,7 @@ class AssistantCog(commands.Cog):
             await message.reply(f"⏳ Estás usando el bot muy rápido. Espera {wait_time} segundos.")
             return
 
-        user_id = message.author.id
+        user_id = (message.guild.id, message.channel.id, message.author.id)
         history = self._get_history(user_id)
         level_name = permission_manager.get_permission_name(message.author)
 
@@ -242,6 +266,25 @@ class AssistantCog(commands.Cog):
                     if not permission_manager.has_permission(message.author, tool_name):
                         denied.append(permission_manager.get_required_level_name(tool_name))
                         continue
+                    if tool_name in DESTRUCTIVE_TOOLS:
+                        _, target, channel, error = await prepare_action(message, tool_name, params)
+                        if error:
+                            denied.append(error)
+                            continue
+                        params["channel"] = f"<#{channel.id}>"
+                        if target:
+                            params["user"] = f"<@{target.id}>"
+                        if tool_name == "clear_messages":
+                            params.setdefault("count", 10)
+                        if tool_name == "set_slowmode":
+                            params.setdefault("seconds", 0)
+                        if tool_name == "mute_user":
+                            from ..utils.helpers import parse_duration
+                            seconds = parse_duration(params.get("duration", "10m"))
+                            if not 0 < seconds <= 28 * 86400:
+                                denied.append("Duración inválida (máximo 28d).")
+                                continue
+                            params["duration"] = f"{seconds}s"
                     valid_tools.append(t)
 
                 destructive = [t for t in valid_tools if t["tool"] in DESTRUCTIVE_TOOLS]

@@ -2,6 +2,32 @@
 
 El formato se basa en [Keep a Changelog](https://keepachangelog.com/).
 
+## [Unreleased]
+
+### Fixed
+
+- (1) `/repostroles` exige propietario y registra la acción.
+- (2) `/deploy` conserva canales, historial y permisos; crea solo elementos faltantes.
+- (3) Lockdown aplica sobrescrituras válidas de canal y persiste su restauración.
+- (4) Herramientas de moderación por IA comprueban permisos nativos y jerarquías de solicitante/bot.
+- (5) Confirmaciones fijan objetivos y parámetros y revalidan permisos actuales antes de ejecutar.
+- (6) Datos y memoria de conversación aislados por servidor; migración con copia previa y `LEGACY_GUILD_ID` para datos ambiguos.
+- (7) Botones persistentes de tickets registrados al iniciar.
+- (8) Archivado completo de tickets y adjuntos en ZIP durable con SHA-256; no se elimina el canal si falla el archivo o registro privado.
+- (9) Timeouts de tests hacen fallar CI; smoke checks ejecutados en el entorno de uv.
+- (10) Rank y leaderboard comparten orden por nivel, XP y desempate por ID.
+- (11) Anti-spam cuenta mensajes en una ventana deslizante real por servidor/usuario/canal.
+- (12) Sorteos guardan ganadores y entregas fallidas se reintentan; comprobantes en Discord permiten recuperar envíos tras interrupciones.
+- (13) Propietario por ID, administradores nativos y roles de permisos persistidos por ID; nuevo `/staffrole`.
+- (14) Resolución ambigua de miembros/canales cancela la acción; soporte de menciones e IDs exactos.
+- (15) Handler de errores conectado al árbol de comandos con respuesta inicial o followup según el estado.
+- Duraciones inválidas o parciales rechazadas y comandos de servidor excluidos de mensajes directos.
+
+### Changed
+
+- 220 tests, incluyendo regresiones de autorización, migración, aislamiento, cierres de tickets, reintentos, rank, spam y lockdown.
+- README y plantilla de variables actualizados con migración, permisos y recuperación.
+
 ## [1.0.0] - 2026-09-01
 
 ### Added

@@ -1,7 +1,7 @@
 import discord
 import logging
 
-from ..config import STAFF_ROLE_NAMES
+from .permissions import permission_manager
 
 logger = logging.getLogger("OmniBot.modlog")
 
@@ -9,6 +9,15 @@ logger = logging.getLogger("OmniBot.modlog")
 async def get_or_create_modlogs(guild: discord.Guild) -> discord.TextChannel | None:
     existing = discord.utils.get(guild.text_channels, name="mod-logs")
     if existing:
+        for role in guild.roles:
+            if existing.permissions_for(role).view_channel and not role.permissions.administrator and role not in permission_manager.staff_roles(guild):
+                logger.error("El canal mod-logs permite acceso a roles no autorizados")
+                return None
+        for target in existing.overwrites:
+            if isinstance(target, discord.Member) and existing.permissions_for(target).view_channel and target.id != guild.me.id:
+                from ..config import is_staff
+                if not is_staff(target):
+                    return None
         return existing
 
     category = (
@@ -22,8 +31,7 @@ async def get_or_create_modlogs(guild: discord.Guild) -> discord.TextChannel | N
             read_messages=True, send_messages=True, read_message_history=True,
         ),
     }
-    for role_name in STAFF_ROLE_NAMES:
-        role = discord.utils.get(guild.roles, name=role_name)
+    for role in permission_manager.staff_roles(guild):
         if role:
             overwrites[role] = discord.PermissionOverwrite(
                 read_messages=True, send_messages=True, read_message_history=True,

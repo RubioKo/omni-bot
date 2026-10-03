@@ -1,3 +1,4 @@
+import json
 import logging
 import time
 from enum import IntEnum
@@ -63,20 +64,60 @@ RATE_LIMITS = {
 class PermissionManager:
     def __init__(self):
         self.user_cooldowns = {}
+        self.role_bindings = {}
 
     def _prune_cooldowns(self, now: float):
         expired = [uid for uid, (ts, _) in self.user_cooldowns.items() if now - ts > 120]
         for uid in expired:
             del self.user_cooldowns[uid]
 
+    async def load_guild(self, guild):
+        from . import database as db
+        key = f"permission_roles_{guild.id}"
+        raw = await db.get_setting(key)
+        if raw is None:
+            bindings = {
+                str(role.id): int(level)
+                for level, names in ROLE_PERMISSION_MAP.items()
+                if PermissionLevel.MEMBER < level < PermissionLevel.OWNER
+                for role in guild.roles if role.name.upper() in names
+            }
+            await db.set_setting(key, json.dumps(bindings))
+        else:
+            bindings = json.loads(raw)
+        self.role_bindings[guild.id] = {int(rid): PermissionLevel(level) for rid, level in bindings.items()}
+
+    async def bind_role(self, guild_id, role_id, level):
+        from . import database as db
+        if level >= PermissionLevel.OWNER:
+            raise ValueError("OWNER se reconoce exclusivamente por owner_id")
+        bindings = dict(self.role_bindings.get(guild_id, {}))
+        if level == PermissionLevel.MEMBER:
+            bindings.pop(role_id, None)
+        else:
+            bindings[role_id] = level
+        await db.set_setting(f"permission_roles_{guild_id}", json.dumps({str(k): int(v) for k, v in bindings.items()}))
+        self.role_bindings[guild_id] = bindings
+
+    def staff_roles(self, guild):
+        bindings = self.role_bindings.get(guild.id, {})
+        return [role for role in guild.roles if bindings.get(role.id, PermissionLevel.MEMBER) >= PermissionLevel.MODERATOR]
+
     def get_permission_level(self, member) -> PermissionLevel:
         if not member or not hasattr(member, 'roles'):
             return PermissionLevel.MEMBER
+        guild = getattr(member, "guild", None)
+        if guild is not None:
+            if member.id == guild.owner_id:
+                return PermissionLevel.OWNER
+            if member.guild_permissions.administrator:
+                return PermissionLevel.ADMIN
+            bindings = self.role_bindings.get(guild.id, {})
+            return max((bindings.get(role.id, PermissionLevel.MEMBER) for role in member.roles), default=PermissionLevel.MEMBER)
         highest = PermissionLevel.MEMBER
         for role in member.roles:
-            role_name = role.name.upper()
-            for level, role_names in ROLE_PERMISSION_MAP.items():
-                if role_name in role_names and level > highest:
+            for level, names in ROLE_PERMISSION_MAP.items():
+                if role.name.upper() in names and level > highest:
                     highest = level
         return highest
 
@@ -114,7 +155,7 @@ class PermissionManager:
         return names.get(required, "PROPIETARIO")
 
     def consume_rate_limit(self, member) -> tuple[bool, int]:
-        user_id = member.id
+        user_id = (getattr(getattr(member, "guild", None), "id", 0), member.id)
         now = time.time()
         self._prune_cooldowns(now)
         if user_id in self.user_cooldowns:
