@@ -25,6 +25,9 @@ El formato se basa en [Keep a Changelog](https://keepachangelog.com/).
 
 ### Changed
 
+- Integradas las actualizaciones revisadas de OpenAI 3.13.0, AnyIO 4.15.1, multidict 6.8.0, Ruff 0.16.7, setup-uv 10.2.0 y Codecov Action 7.1.1.
+- `requirements.txt` regenerado desde `uv.lock`; Pydantic 2.13.4 y pydantic-core 2.46.4 conservados como pareja compatible. El bump aislado a pydantic-core 2.49.0 se descarta.
+- CI verifica la vigencia de `uv.lock` y la coincidencia del export de requirements antes de validar el código.
 - 220 tests, incluyendo regresiones de autorización, migración, aislamiento, cierres de tickets, reintentos, rank, spam y lockdown.
 - README y plantilla de variables actualizados con migración, permisos y recuperación.
 
