@@ -1,3 +1,4 @@
+import asyncio
 import discord
 from discord import app_commands
 from discord.ext import commands
@@ -11,6 +12,8 @@ from ..config import config, is_staff
 from ..services import database as db
 from ..services import modlog as modlog_service
 from ..services.permissions import permission_manager
+from ..services.authorization import authorize_action
+from ..services.lockdown import set_lockdown
 
 logger = logging.getLogger("OmniBot.automod")
 
@@ -113,6 +116,7 @@ class AutoModCog(commands.Cog):
         self.bot = bot
         self.joins = {}
         self._last_punished = {}
+        self._lockdown_locks = {}
 
     def _is_staff(self, member: discord.Member) -> bool:
         return is_staff(member)
@@ -124,14 +128,17 @@ class AutoModCog(commands.Cog):
                 return ch.mention
         return "al staff"
 
-    async def _get_mute_duration(self, user_id: int) -> int:
-        warnings = await db.get_active_warnings(user_id)
+    async def _get_mute_duration(self, user_id: int, guild_id: int) -> int:
+        warnings = await db.get_active_warnings(user_id, guild_id=guild_id)
         count = max(len(warnings), 1)
         idx = min(count - 1, len(MUTE_DURATIONS) - 1)
         return MUTE_DURATIONS[idx]
 
     @commands.Cog.listener()
     async def on_message(self, message):
+        ready = getattr(self.bot, "_data_ready", None)
+        if ready is not None and not ready.is_set():
+            return
         if message.author.bot or message.guild is None:
             return
         if self._is_staff(message.author):
@@ -152,9 +159,9 @@ class AutoModCog(commands.Cog):
 
     async def _auto_punish(self, message, category: str, reason_prefix: str):
         now = time.time()
-        if now - self._last_punished.get(message.author.id, 0) < AUTO_PUNISH_COOLDOWN:
+        if now - self._last_punished.get((message.guild.id, message.author.id), 0) < AUTO_PUNISH_COOLDOWN:
             return
-        self._last_punished[message.author.id] = now
+        self._last_punished[(message.guild.id, message.author.id)] = now
 
         try:
             await message.delete()
@@ -162,8 +169,8 @@ class AutoModCog(commands.Cog):
             pass
 
         reason = f"Auto-mod: {reason_prefix}"
-        warning = await db.add_warning(message.author.id, self.bot.user.id, reason)
-        await db.log_mod_action(message.author.id, category, self.bot.user.id, reason)
+        warning = await db.add_warning(message.author.id, self.bot.user.id, reason, guild_id=message.guild.id)
+        await db.log_mod_action(message.author.id, category, self.bot.user.id, reason, guild_id=message.guild.id)
         await modlog_service.log_action(
             message.guild,
             action=category,
@@ -173,7 +180,7 @@ class AutoModCog(commands.Cog):
         )
 
         total = warning["total_active"]
-        mute_duration = min(await self._get_mute_duration(message.author.id), MAX_TIMEOUT_SECONDS)
+        mute_duration = min(await self._get_mute_duration(message.author.id, message.guild.id), MAX_TIMEOUT_SECONDS)
 
         try:
             await message.author.timeout(
@@ -205,7 +212,7 @@ class AutoModCog(commands.Cog):
         logger.info(f"{category}: {message.author} in #{message.channel} - {reason_prefix}")
 
     async def _check_spam(self, message):
-        count = await db.track_spam(message.author.id, message.channel.id, SPAM_WINDOW)
+        count = await db.track_spam(message.author.id, message.channel.id, SPAM_WINDOW, guild_id=message.guild.id)
         if count >= SPAM_THRESHOLD:
             await self._auto_punish(
                 message, "SPAM", f"Anti-spam: {count} mensajes en {int(SPAM_WINDOW)}s"
@@ -315,21 +322,16 @@ class AutoModCog(commands.Cog):
             self.joins[guild_id].clear()
 
     async def _auto_lockdown(self, guild: discord.Guild):
-        everyone = guild.default_role
-        if not everyone.permissions.send_messages:
-            return
-        try:
-            await everyone.edit(send_messages=False)
-            await modlog_service.log_action(
-                guild,
-                action="RAID_LOCKDOWN",
-                target_id=guild.id,
-                moderator_id=self.bot.user.id,
-                reason="Bloqueo automático de canales por raid detectado",
-            )
-            logger.warning(f"Auto-lockdown activated in {guild.name} (raid detected)")
-        except discord.Forbidden:
-            logger.warning(f"No permissions to auto-lockdown {guild.name}")
+        lock = self._lockdown_locks.setdefault(guild.id, asyncio.Lock())
+        async with lock:
+            try:
+                await set_lockdown(guild, True)
+                await modlog_service.log_action(
+                    guild, action="RAID_LOCKDOWN", target_id=guild.id,
+                    moderator_id=self.bot.user.id, reason="Bloqueo automático por raid",
+                )
+            except discord.HTTPException:
+                logger.exception("No se pudo completar lockdown; estado conservado para restauración")
 
     async def _alert_raid(self, guild):
         staff_channel = None
@@ -370,25 +372,23 @@ class AutoModCog(commands.Cog):
         logger.warning(f"RAID detected in {guild.name}: {RAID_THRESHOLD}+ joins in {RAID_WINDOW}s")
 
     async def _check_hierarchy(self, interaction: discord.Interaction, member: discord.Member) -> bool:
-        guild = interaction.guild
-        if member.id == guild.owner_id:
-            await interaction.followup.send("No puedes sancionar al propietario del servidor.")
-            return False
-        if member.top_role >= interaction.user.top_role and interaction.user.id != guild.owner_id:
-            await interaction.followup.send("No puedes sancionar a un miembro con rol igual o superior al tuyo.")
-            return False
-        if member.top_role >= guild.me.top_role:
-            await interaction.followup.send("No puedo sancionar a un miembro con rol igual o superior al mío.")
+        actor = await interaction.guild.fetch_member(interaction.user.id)
+        action = "kick_user" if interaction.command.name == "kick" else "ban_user"
+        current_target = await interaction.guild.fetch_member(member.id)
+        error = authorize_action(actor, interaction.guild, action, target=current_target, channel=interaction.channel)
+        if error:
+            await interaction.followup.send(error, ephemeral=True)
             return False
         return True
 
+    @app_commands.guild_only()
     @app_commands.command(name="warnings", description="Ver advertencias de un miembro")
     @app_commands.describe(member="Miembro a consultar")
     async def warnings_cmd(self, interaction: discord.Interaction, member: discord.Member):
         if not permission_manager.has_permission(interaction.user, "warn_user"):
             await interaction.response.send_message("Necesitas permisos de **MODERADOR** para usar este comando.")
             return
-        warns = await db.get_active_warnings(member.id)
+        warns = await db.get_active_warnings(member.id, guild_id=interaction.guild.id)
         if not warns:
             await interaction.response.send_message(f"✅ {member.mention} no tiene warnings activos.")
             return
@@ -399,14 +399,15 @@ class AutoModCog(commands.Cog):
             lines.append(f"• {ts} — {w['reason']}")
         await interaction.response.send_message("\n".join(lines))
 
+    @app_commands.guild_only()
     @app_commands.command(name="clearwarnings", description="Limpiar advertencias de un miembro")
     @app_commands.describe(member="Miembro a limpiar")
     async def clearwarnings_cmd(self, interaction: discord.Interaction, member: discord.Member):
         if not permission_manager.has_permission(interaction.user, "clearwarnings"):
             await interaction.response.send_message("Necesitas permisos de **MODERADOR** para usar este comando.")
             return
-        count = await db.clear_warnings(member.id)
-        await db.log_mod_action(member.id, "CLEAR_WARNINGS", interaction.user.id, f"Cleared {count} warnings")
+        count = await db.clear_warnings(member.id, guild_id=interaction.guild.id)
+        await db.log_mod_action(member.id, "CLEAR_WARNINGS", interaction.user.id, f"Cleared {count} warnings", guild_id=interaction.guild.id)
         await modlog_service.log_action(
             interaction.guild,
             action="CLEAR_WARNINGS",
@@ -416,6 +417,7 @@ class AutoModCog(commands.Cog):
         )
         await interaction.response.send_message(f"✅ Se limpiaron **{count} warnings** de {member.mention}.")
 
+    @app_commands.guild_only()
     @app_commands.command(name="modlog", description="Ver registro de moderacion")
     @app_commands.describe(limit="Numero de entradas (default 10)")
     async def modlog_cmd(self, interaction: discord.Interaction, limit: int = 10):
@@ -423,7 +425,7 @@ class AutoModCog(commands.Cog):
             await interaction.response.send_message("Necesitas permisos de **MODERADOR** para usar este comando.")
             return
         limit = min(max(limit, 1), 50)
-        logs = await db.get_modlog(limit)
+        logs = await db.get_modlog(limit, guild_id=interaction.guild.id)
         if not logs:
             await interaction.response.send_message("📋 No hay acciones de moderación recientes.")
             return
@@ -436,6 +438,7 @@ class AutoModCog(commands.Cog):
             lines.append(f"`{ts}` **{log['action']}** — {user_name} — {log['reason'][:50]}")
         await interaction.response.send_message("\n".join(lines))
 
+    @app_commands.guild_only()
     @app_commands.command(name="modwords", description="Ver palabras filtradas (MOD+)")
     async def modwords_cmd(self, interaction: discord.Interaction):
         if not permission_manager.has_permission(interaction.user, "warn_user"):
@@ -447,6 +450,7 @@ class AutoModCog(commands.Cog):
             return
         await interaction.response.send_message(f"📋 **Palabras filtradas ({len(words)})**:\n```{', '.join(words)}```")
 
+    @app_commands.guild_only()
     @app_commands.command(name="kick", description="Expulsar un miembro del servidor")
     @app_commands.describe(member="Miembro a expulsar", reason="Motivo de la expulsion")
     async def kick_cmd(self, interaction: discord.Interaction, member: discord.Member, *, reason: str = "Sin razon"):
@@ -458,7 +462,7 @@ class AutoModCog(commands.Cog):
             return
         try:
             await member.kick(reason=reason)
-            await db.log_mod_action(member.id, "KICK", interaction.user.id, reason)
+            await db.log_mod_action(member.id, "KICK", interaction.user.id, reason, guild_id=interaction.guild.id)
             await modlog_service.log_action(
                 interaction.guild, action="KICK", target_id=member.id,
                 moderator_id=interaction.user.id, reason=reason,
@@ -470,6 +474,7 @@ class AutoModCog(commands.Cog):
             logger.error(f"Kick error: {e}")
             await interaction.followup.send("Ocurrio un error al expulsar al miembro.")
 
+    @app_commands.guild_only()
     @app_commands.command(name="ban", description="Banear un miembro del servidor")
     @app_commands.describe(member="Miembro a banear", reason="Motivo del baneo")
     async def ban_cmd(self, interaction: discord.Interaction, member: discord.Member, *, reason: str = "Sin razon"):
@@ -481,7 +486,7 @@ class AutoModCog(commands.Cog):
             return
         try:
             await member.ban(reason=reason, delete_message_seconds=86400)
-            await db.log_mod_action(member.id, "BAN", interaction.user.id, reason)
+            await db.log_mod_action(member.id, "BAN", interaction.user.id, reason, guild_id=interaction.guild.id)
             await modlog_service.log_action(
                 interaction.guild, action="BAN", target_id=member.id,
                 moderator_id=interaction.user.id, reason=reason,
@@ -493,6 +498,7 @@ class AutoModCog(commands.Cog):
             logger.error(f"Ban error: {e}")
             await interaction.followup.send("Ocurrio un error al banear al miembro.")
 
+    @app_commands.guild_only()
     @app_commands.command(name="unban", description="Desbanear un usuario por ID")
     @app_commands.describe(user_id="ID del usuario a desbanear")
     async def unban_cmd(self, interaction: discord.Interaction, user_id: str):
@@ -503,7 +509,7 @@ class AutoModCog(commands.Cog):
             uid = int(user_id)
             user = await self.bot.fetch_user(uid)
             await interaction.guild.unban(user)
-            await db.log_mod_action(uid, "UNBAN", interaction.user.id, "Desbaneado")
+            await db.log_mod_action(uid, "UNBAN", interaction.user.id, "Desbaneado", guild_id=interaction.guild.id)
             await modlog_service.log_action(
                 interaction.guild, action="UNBAN", target_id=uid,
                 moderator_id=interaction.user.id, reason="Desbaneado",
@@ -517,25 +523,27 @@ class AutoModCog(commands.Cog):
             logger.error(f"Unban error: {e}")
             await interaction.response.send_message("Ocurrio un error al desbanear al usuario.")
 
+    @app_commands.guild_only()
     @app_commands.command(name="lockdown", description="Bloquear/desbloquear canales del servidor")
     async def lockdown_cmd(self, interaction: discord.Interaction):
         if not permission_manager.has_permission(interaction.user, "lockdown"):
             await interaction.response.send_message("Necesitas permisos de **MODERADOR** para usar este comando.")
             return
+        await interaction.response.defer(ephemeral=True)
         guild = interaction.guild
-        everyone = guild.default_role
-        current = everyone.permissions.send_messages
-
-        await everyone.edit(send_messages=not current)
-        state = "🔴 BLOQUEADO" if current else "🟢 DESBLOQUEADO"
-        await modlog_service.log_action(
-            interaction.guild,
-            action="LOCKDOWN" if current else "UNLOCKDOWN",
-            target_id=guild.id,
-            moderator_id=interaction.user.id,
-            reason="Canales bloqueados" if current else "Canales desbloqueados",
-        )
-        await interaction.response.send_message(f"{state} — Los canales de texto han sido {'bloqueados' if current else 'desbloqueados'}.")
+        actor = await guild.fetch_member(interaction.user.id)
+        error = authorize_action(actor, guild, "lockdown")
+        if error:
+            await interaction.followup.send(error)
+            return
+        lock = self._lockdown_locks.setdefault(guild.id, asyncio.Lock())
+        async with lock:
+            enabled = not bool(await db.get_setting(f"lockdown_{guild.id}"))
+            await set_lockdown(guild, enabled)
+            action = "LOCKDOWN" if enabled else "UNLOCKDOWN"
+            await db.log_mod_action(guild.id, action, actor.id, guild_id=guild.id)
+            await modlog_service.log_action(guild, action=action, target_id=guild.id, moderator_id=actor.id)
+        await interaction.followup.send("🔴 Canales bloqueados." if enabled else "🟢 Permisos originales restaurados.")
 
 
 async def setup(bot):

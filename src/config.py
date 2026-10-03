@@ -44,6 +44,7 @@ def _env_secret(key: str, default: str = "") -> SecretStr:
 
 @dataclass
 class Config:
+    legacy_guild_id: int = field(default_factory=lambda: _env_int("LEGACY_GUILD_ID"))
     discord_token: str = field(default_factory=lambda: _env_secret("DISCORD_TOKEN"))
     openrouter_api_key: str = field(default_factory=lambda: _env_secret("OPENROUTER_API_KEY"))
     openrouter_model: str = field(default_factory=lambda: os.getenv("OPENROUTER_MODEL", "openai/gpt-4o-mini"))
@@ -92,7 +93,8 @@ _STAFF_NAMES_UPPER = frozenset(n.upper() for n in STAFF_ROLE_NAMES)
 
 
 def is_staff(member: Member) -> bool:
-    return any(r.name.upper() in _STAFF_NAMES_UPPER for r in member.roles)
+    from .services.permissions import permission_manager, PermissionLevel
+    return permission_manager.get_permission_level(member) >= PermissionLevel.MODERATOR
 
 
 config = Config()

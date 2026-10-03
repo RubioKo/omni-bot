@@ -263,17 +263,17 @@ async def _fetch_from_meme_api(subreddit: str) -> dict | None:
     }
 
 
-async def get_daily_meme(theme: str | None = None) -> dict | None:
+async def get_daily_meme(theme: str | None = None, *, guild_id: int = 0) -> dict | None:
     pool = get_subreddit_pool(theme)
 
     try:
-        stored = await db.get_setting("meme_sub_index")
+        stored = await db.get_setting(f"meme_sub_index_{guild_id}")
         start_idx = int(stored) if stored and stored.isdigit() else 0
     except Exception:
         start_idx = 0
     start_idx = start_idx % len(pool) if pool else 0
 
-    weights = await db.get_source_weights()
+    weights = await db.get_source_weights(guild_id=guild_id)
     if weights:
         shuffled = list(pool)
         random.shuffle(shuffled)
@@ -289,11 +289,11 @@ async def get_daily_meme(theme: str | None = None) -> dict | None:
             "is_video": bool(post.get("is_video", False)),
         }
         async with _meme_selection_lock:
-            seen = await db.is_meme_seen(meme["url"])
+            seen = await db.is_meme_seen(meme["url"], guild_id=guild_id)
             if seen:
                 return None
-            await db.add_meme_history(meme["url"], meme["title"])
-            await db.set_setting("meme_sub_index", str(_next_index(idx, len(pool))))
+            await db.add_meme_history(meme["url"], meme["title"], guild_id=guild_id)
+            await db.set_setting(f"meme_sub_index_{guild_id}", str(_next_index(idx, len(pool))))
         logger.info(
             f"Meme ({meme['subreddit']}): {meme['title'][:60]} "
             f"({meme['upvotes']} ups)"
@@ -349,11 +349,11 @@ async def get_daily_meme(theme: str | None = None) -> dict | None:
     return None
 
 
-async def get_memes(count: int = 1, theme: str | None = None) -> list:
+async def get_memes(count: int = 1, theme: str | None = None, *, guild_id: int = 0) -> list:
     count = min(max(int(count), 1), 3)
     memes = []
     for _ in range(count):
-        meme = await get_daily_meme(theme)
+        meme = await get_daily_meme(theme, guild_id=guild_id)
         if not meme:
             break
         memes.append(meme)
@@ -419,7 +419,7 @@ class MemeRerollView(discord.ui.View):
                 return
 
             weekday_theme = get_theme_for_weekday(datetime.now().weekday())
-            meme = await get_daily_meme(weekday_theme)
+            meme = await get_daily_meme(weekday_theme, guild_id=interaction.guild.id)
             if not meme:
                 await interaction.followup.send(
                     "No hay más memes frescos ahora. Volvé más tarde.",

@@ -20,11 +20,13 @@ class InfoCog(commands.Cog):
                 ids.add(ch.id)
         return ids
 
+    @app_commands.guild_only()
     @app_commands.command(name="ping", description="Ver latencia del bot")
     async def ping_cmd(self, interaction: discord.Interaction):
         latency = round(self.bot.latency * 1000)
         await interaction.response.send_message(f"🏓 Pong! Latencia: **{latency}ms**")
 
+    @app_commands.guild_only()
     @app_commands.command(name="guia", description="Guia de inicio del servidor")
     async def guia_cmd(self, interaction: discord.Interaction):
         embed = discord.Embed(
@@ -86,6 +88,7 @@ class InfoCog(commands.Cog):
         embed.set_footer(text="OmniBot | Usa /comandos para ver todos los comandos")
         await interaction.response.send_message(embed=embed)
 
+    @app_commands.guild_only()
     @app_commands.command(name="reglas", description="Publicar reglas del servidor")
     async def reglas_cmd(self, interaction: discord.Interaction):
         if not permission_manager.has_permission(interaction.user, "reglas"):
@@ -94,6 +97,7 @@ class InfoCog(commands.Cog):
         from ..services.rules import build_rules_embed
         await interaction.response.send_message(embed=build_rules_embed())
 
+    @app_commands.guild_only()
     @app_commands.command(name="comandos", description="Lista de comandos disponibles")
     async def comandos_cmd(self, interaction: discord.Interaction):
         level = permission_manager.get_permission_level(interaction.user)
@@ -157,6 +161,7 @@ class InfoCog(commands.Cog):
         embed.set_footer(text="Usa /guia para la guia completa de inicio")
         await interaction.response.send_message(embed=embed)
 
+    @app_commands.guild_only()
     @app_commands.command(name="meme", description="Publicar memes del top del día (MOD+)")
     @app_commands.describe(cantidad="Cantidad de memes (1-3, default 1)")
     async def meme_cmd(self, interaction: discord.Interaction, cantidad: int = 1):
@@ -173,7 +178,7 @@ class InfoCog(commands.Cog):
             MemeRerollView,
         )
         theme = get_theme_for_weekday(datetime.now().weekday())
-        memes = await get_memes(cantidad, theme)
+        memes = await get_memes(cantidad, theme, guild_id=interaction.guild.id)
 
         if not memes:
             await interaction.followup.send("No se encontraron memes. Intenta mas tarde.")
@@ -239,7 +244,7 @@ class InfoCog(commands.Cog):
         elif "📱" in footer:
             source = footer.split("📱")[1].split("·")[0].strip().lower()
 
-        await db.record_meme_feedback(url, source, delta)
+        await db.record_meme_feedback(url, source, delta, guild_id=payload.guild_id)
 
 
 async def setup(bot):

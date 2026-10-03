@@ -25,10 +25,18 @@ class OmniBot(commands.Bot):
         self.config = config
         self._ready_done = False
         self._lavalink_ready = False
-        self._last_meme_slot = None
+        self._data_ready = asyncio.Event()
+        self.tree.on_error = self.on_app_command_error
+        self.tree.interaction_check = self.check_data_ready
         self._task_errors = {}
         self._web_server = None
         self._web_server_task = None
+
+    async def check_data_ready(self, interaction):
+        if self._data_ready.is_set():
+            return True
+        await interaction.response.send_message("El bot está preparando los datos. Inténtalo en unos segundos.", ephemeral=True)
+        return False
 
     async def close(self):
         from .services import database
@@ -39,6 +47,10 @@ class OmniBot(commands.Bot):
                 await asyncio.wait_for(self._web_server_task, timeout=5)
             except Exception:
                 logger.warning("Web server task did not exit cleanly on shutdown")
+        self.daily_meme.cancel()
+        self.db_backup.cancel()
+        for name in list(self.extensions):
+            await self.unload_extension(name)
         await database.close_db()
         await super().close()
 
@@ -63,8 +75,9 @@ class OmniBot(commands.Bot):
             except Exception as e:
                 logger.error(f"Failed to load {ext}: {e}", exc_info=True)
 
-        from .cogs.tickets import TicketView
+        from .cogs.tickets import TicketView, TicketButtons
         self.add_view(TicketView())
+        self.add_view(TicketButtons())
         from .services.memes import MemeRerollView
         self.add_view(MemeRerollView())
 
@@ -152,7 +165,7 @@ class OmniBot(commands.Bot):
 
     @db_backup.before_loop
     async def before_db_backup(self):
-        await self.wait_until_ready()
+        await self.wait_until_data_ready()
 
     async def on_ready(self):
         logger.info(f"Bot connected as {self.user} ({self.user.id})")
@@ -161,9 +174,22 @@ class OmniBot(commands.Bot):
 
         if self._ready_done:
             return
+        from .services import database
+        from .services.permissions import permission_manager
+        await database.assign_legacy_data(self.guilds, config.legacy_guild_id)
+        for guild in self.guilds:
+            await permission_manager.load_guild(guild)
+        self._data_ready.set()
         self._ready_done = True
-
         await self._start_autoradio_on_boot()
+
+    async def wait_until_data_ready(self):
+        await self.wait_until_ready()
+        await self._data_ready.wait()
+
+    async def on_guild_join(self, guild):
+        from .services.permissions import permission_manager
+        await permission_manager.load_guild(guild)
 
     async def _start_autoradio_on_boot(self):
         await asyncio.sleep(3)
@@ -172,11 +198,6 @@ class OmniBot(commands.Bot):
             return
         from .cogs.music import autoradio_enabled
         from .services import database
-        try:
-            last_slot = await database.get_setting("meme_last_slot")
-            self._last_meme_slot = last_slot
-        except Exception:
-            pass
         for guild in self.guilds:
             try:
                 state = await database.get_setting(f"autoradio_{guild.id}")
@@ -215,72 +236,64 @@ class OmniBot(commands.Bot):
                 return
 
             slot = f"{now.date().isoformat()}-{now.hour}"
-            if slot == self._last_meme_slot:
-                return
-
             is_weekly_slot = now.weekday() == 0 and now.hour == hours[0]
-
-            if is_weekly_slot:
-                await self._post_weekly_winner()
-
             theme = get_theme_for_weekday(now.weekday())
-            meme = await get_daily_meme(theme)
-
-            if not meme:
-                logger.warning("No meme found for this slot")
-                return
-
             for guild in self.guilds:
+                key = f"meme_last_slot_{guild.id}"
+                if await database.get_setting(key) == slot:
+                    continue
                 channel = discord.utils.get(guild.text_channels, name="memes")
                 if not channel:
                     continue
                 try:
+                    if is_weekly_slot:
+                        await self._post_weekly_winner(guild)
+                    meme = await get_daily_meme(theme, guild_id=guild.id)
+                    if not meme:
+                        continue
                     await send_meme(channel, meme, MemeRerollView())
+                    await database.set_setting(key, slot)
                     logger.info(f"Meme posted in {guild.name}/#memes")
-                except Exception as e:
-                    logger.error(f"Error posting meme in {guild.name}: {e}")
-
-            self._last_meme_slot = slot
-            await database.set_setting("meme_last_slot", slot)
+                except Exception:
+                    logger.exception("Error posting meme in %s", guild.name)
             await database.prune_meme_history(30)
         except Exception as e:
             logger.error(f"Daily meme task error: {e}", exc_info=True)
             await self.report_task_error("daily_meme", e)
 
-    async def _post_weekly_winner(self):
+    async def _post_weekly_winner(self, guild):
         from .services import database
         try:
-            winner = await database.get_weekly_winner(7)
+            winner = await database.get_weekly_winner(7, guild_id=guild.id)
             if not winner:
                 logger.info("Weekly meme skipped: no feedback data yet")
                 return
 
             from .services.memes import prepare_memes
 
-            for guild in self.guilds:
-                channel = discord.utils.get(guild.text_channels, name="memes")
-                if not channel:
-                    continue
-                try:
-                    embeds, files = await prepare_memes([{
-                        "title": winner["title"] or "El meme más reaccionado de la semana",
-                        "url": winner["url"],
-                        "permalink": None,
-                        "subreddit": winner["source"],
-                        "upvotes": winner["reactions"],
-                        "is_video": False,
-                    }])
-                    if not embeds:
-                        continue
-                    embed = embeds[0]
-                    embed.title = "🏆 MEME DE LA SEMANA"
-                    embed.set_footer(text=f"😂 {winner['reactions']} reacciones esta semana")
-                    kwargs = {"embed": embed}
-                    if files:
-                        kwargs["files"] = files
-                    await channel.send(**kwargs)
-                except Exception as e:
-                    logger.error(f"Error posting weekly meme in {guild.name}: {e}")
+            channel = discord.utils.get(guild.text_channels, name="memes")
+            if not channel:
+                return
+            try:
+                embeds, files = await prepare_memes([{
+                    "title": winner["title"] or "El meme más reaccionado de la semana",
+                    "url": winner["url"],
+                    "permalink": None,
+                    "subreddit": winner["source"],
+                    "upvotes": winner["reactions"],
+                    "is_video": False,
+                }])
+                if not embeds:
+                    return
+                embed = embeds[0]
+                embed.title = "🏆 MEME DE LA SEMANA"
+                embed.set_footer(text=f"😂 {winner['reactions']} reacciones esta semana")
+                kwargs = {"embed": embed}
+                if files:
+                    kwargs["files"] = files
+                await channel.send(**kwargs)
+            except Exception as e:
+                logger.error(f"Error posting weekly meme in {guild.name}: {e}")
             logger.info(f"Weekly meme winner posted ({winner['reactions']} reactions)")
         except Exception as e:
             logger.error(f"Weekly meme task error: {e}", exc_info=True)
@@ -288,40 +301,25 @@ class OmniBot(commands.Bot):
 
     @daily_meme.before_loop
     async def before_daily_meme(self):
-        await self.wait_until_ready()
+        await self.wait_until_data_ready()
 
     async def on_app_command_error(self, interaction: discord.Interaction, error: discord.app_commands.AppCommandError):
         original = getattr(error, "original", error)
         command_name = getattr(getattr(interaction, "command", None), "qualified_name", None) or "desconocido"
         if isinstance(original, discord.NotFound):
-            logger.warning(f"App command interaction expired: {command_name}")
-            return
-        if isinstance(original, discord.app_commands.MissingPermissions):
-            try:
-                await interaction.response.send_message("No tienes permisos para usar este comando.", ephemeral=True)
-            except discord.InteractionResponded:
-                pass
+            logger.warning("App command interaction expired: %s", command_name)
             return
         if isinstance(original, discord.app_commands.CheckFailure):
-            try:
-                await interaction.response.send_message("No tienes permisos para usar este comando.", ephemeral=True)
-            except discord.InteractionResponded:
-                pass
-            return
-
-        logger.error(f"App command error in {command_name}: {error}", exc_info=error)
+            content = "No tienes permisos para usar este comando."
+        else:
+            logger.error("App command error in %s", command_name, exc_info=(type(original), original, original.__traceback__))
+            content = f"Ocurrió un error al ejecutar `{command_name}`. Revisa los logs."
         try:
             if interaction.response.is_done():
-                await interaction.followup.send(
-                    f"Ocurrió un error al ejecutar `{command_name}`. Revisa los logs.",
-                    ephemeral=True,
-                )
+                await interaction.followup.send(content, ephemeral=True)
             else:
-                await interaction.response.send_message(
-                    f"Ocurrió un error al ejecutar `{command_name}`. Revisa los logs.",
-                    ephemeral=True,
-                )
-        except Exception:
-            logger.error("on_app_command_error: no se pudo enviar el mensaje de error (interaccion expirada)")
+                await interaction.response.send_message(content, ephemeral=True)
+        except discord.HTTPException:
+            logger.warning("No se pudo responder al error de %s", command_name)
 
 bot = OmniBot()

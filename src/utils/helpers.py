@@ -4,8 +4,13 @@ DURATION_PATTERN = re.compile(r"(\d+)\s*(min|s|m|h|d)", re.IGNORECASE)
 
 
 def parse_duration(text: str) -> int:
+    if not isinstance(text, str):
+        return 0
+    matches = list(DURATION_PATTERN.finditer(text))
+    if not matches or DURATION_PATTERN.sub("", text).strip():
+        return 0
     total = 0
-    for match in DURATION_PATTERN.finditer(text):
+    for match in matches:
         num = int(match.group(1))
         unit = match.group(2).lower()
         if unit == "s":

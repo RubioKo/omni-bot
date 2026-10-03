@@ -284,6 +284,7 @@ class MusicCog(commands.Cog):
     def _check_dj(self, interaction: discord.Interaction, cmd):
         return permission_manager.has_permission(interaction.user, cmd)
 
+    @app_commands.guild_only()
     @app_commands.command(name="play", description="Reproducir una cancion")
     @app_commands.describe(query="Nombre de la cancion o URL")
     async def play(self, interaction: discord.Interaction, *, query: str):
@@ -371,6 +372,7 @@ class MusicCog(commands.Cog):
                 embed.set_thumbnail(url=track.artwork)
             await msg.edit(content=None, embed=embed)
 
+    @app_commands.guild_only()
     @app_commands.command(name="skip", description="Saltar cancion actual")
     async def skip(self, interaction: discord.Interaction):
         if not self._check_dj(interaction, "skip_music"):
@@ -383,6 +385,7 @@ class MusicCog(commands.Cog):
         await player.skip()
         await interaction.response.send_message("Cancion saltada.")
 
+    @app_commands.guild_only()
     @app_commands.command(name="stop", description="Parar musica y desconectar")
     async def stop(self, interaction: discord.Interaction):
         if not self._check_dj(interaction, "stop_music"):
@@ -402,6 +405,7 @@ class MusicCog(commands.Cog):
         await player.disconnect()
         await interaction.response.send_message("Bot desconectado del canal.")
 
+    @app_commands.guild_only()
     @app_commands.command(name="disconnect", description="Desconectar bot de voz")
     async def disconnect(self, interaction: discord.Interaction):
         if not self._check_dj(interaction, "disconnect_music"):
@@ -409,6 +413,7 @@ class MusicCog(commands.Cog):
             return
         await self.stop(interaction)
 
+    @app_commands.guild_only()
     @app_commands.command(name="queue", description="Ver cola de reproduccion")
     async def queue_cmd(self, interaction: discord.Interaction):
         player = interaction.guild.voice_client
@@ -444,6 +449,7 @@ class MusicCog(commands.Cog):
         embed.set_footer(text=f"Volumen: {vol}% | Loop: {mode}")
         await interaction.response.send_message(embed=embed)
 
+    @app_commands.guild_only()
     @app_commands.command(name="np", description="Ver cancion actual")
     async def nowplaying(self, interaction: discord.Interaction):
         player = interaction.guild.voice_client
@@ -477,6 +483,7 @@ class MusicCog(commands.Cog):
             embed.set_thumbnail(url=track.artwork)
         await interaction.response.send_message(embed=embed)
 
+    @app_commands.guild_only()
     @app_commands.command(name="volume", description="Ajustar volumen (1-200)")
     @app_commands.describe(level="Nivel de volumen (1-200)")
     async def volume(self, interaction: discord.Interaction, level: int = None):
@@ -499,6 +506,7 @@ class MusicCog(commands.Cog):
         await player.set_volume(level)
         await interaction.response.send_message(f"Volumen ajustado a **{level}%**")
 
+    @app_commands.guild_only()
     @app_commands.command(name="loop", description="Alternar modo loop (off/track/cola)")
     async def loop_cmd(self, interaction: discord.Interaction):
         if not self._check_dj(interaction, "loop_music"):
@@ -518,6 +526,7 @@ class MusicCog(commands.Cog):
         names = {wavelink.QueueMode.normal: "OFF", wavelink.QueueMode.loop: "TRACK", wavelink.QueueMode.loop_all: "QUEUE"}
         await interaction.response.send_message(f"Loop: **{names[next_mode]}**")
 
+    @app_commands.guild_only()
     @app_commands.command(name="pause", description="Pausar reproduccion")
     async def pause(self, interaction: discord.Interaction):
         if not self._check_dj(interaction, "pause_music"):
@@ -530,6 +539,7 @@ class MusicCog(commands.Cog):
         await player.pause(True)
         await interaction.response.send_message("Pausado.")
 
+    @app_commands.guild_only()
     @app_commands.command(name="resume", description="Reanudar reproduccion")
     async def resume(self, interaction: discord.Interaction):
         if not self._check_dj(interaction, "resume_music"):
@@ -542,6 +552,7 @@ class MusicCog(commands.Cog):
         await player.pause(False)
         await interaction.response.send_message("Reanudado.")
 
+    @app_commands.guild_only()
     @app_commands.command(name="radio", description="Iniciar radio 24/7")
     @app_commands.describe(station="Estacion (lofi, synthwave, chill, pop, rock)")
     async def radio(self, interaction: discord.Interaction, station: str = "rock"):
@@ -600,6 +611,7 @@ class MusicCog(commands.Cog):
             if current.lower() in key.lower() or current.lower() in info["name"].lower()
         ]
 
+    @app_commands.guild_only()
     @app_commands.command(name="radiostop", description="Detener radio y auto-radio")
     async def radiostop(self, interaction: discord.Interaction):
         if not self._check_dj(interaction, "stop_music"):
@@ -621,6 +633,7 @@ class MusicCog(commands.Cog):
 
         await interaction.response.send_message("Radio y auto-radio detenidas. Usa `/autoradio on` para reactivar.")
 
+    @app_commands.guild_only()
     @app_commands.command(name="musiconly", description="Canal de radio: solo escuchar (ADMIN)")
     async def musiconly_cmd(self, interaction: discord.Interaction):
         if not self._check_dj(interaction, "admin_config"):
@@ -689,6 +702,7 @@ class MusicCog(commands.Cog):
             f"*La radio no se ve afectada: el audio del bot no depende del permiso Hablar.*"
         )
 
+    @app_commands.guild_only()
     @app_commands.command(name="autoradio", description="Configurar auto-radio (admin)")
     @app_commands.describe(action="on / off / status")
     async def autoradio(self, interaction: discord.Interaction, action: str = "status"):

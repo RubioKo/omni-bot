@@ -28,7 +28,7 @@ uv run pytest -v --tb=short       # tests
 uv run python -m compileall -q src/ tests/   # sintaxis
 ```
 
-> **Nota pytest (solo CI/Windows):** algunos runs terminan con exit 124 por el cleanup de audioop en discord.py; el job de CI lo maneja con `timeout` y lo avisa como notice. Localmente, si colgara en Windows, usar `timeout` igual.
+> **Nota pytest:** un timeout de pytest siempre falla el CI; nunca se interpreta como éxito.
 
 ## Estructura clave
 

@@ -24,14 +24,14 @@
 
 [![Security](https://img.shields.io/badge/🔒-Blindado-57F287?style=for-the-badge)](#-seguridad)
 [![CI](https://img.shields.io/badge/✅-CI_GitHub_Actions-5865F2?style=for-the-badge)](#-ci--tests)
-[![Tests](https://img.shields.io/badge/🧪-181_Tests-57F287?style=for-the-badge)](#-ci--tests)
+[![Tests](https://img.shields.io/badge/🧪-220_Tests-57F287?style=for-the-badge)](#-ci--tests)
 [![Deploy](https://img.shields.io/badge/🚀-Deploy_Dokploy-5865F2?style=for-the-badge)](#deploy)
 [![License](https://img.shields.io/badge/LICENSE-AGPL--3.0-8A2BE2?style=for-the-badge)](LICENSE)
 [![Version](https://img.shields.io/badge/📦-v1.0.0-FF4500?style=for-the-badge)](#)
 
 <br>
 
-<img src="https://readme-typing-svg.demolab.com?font=Fira+Code&size=20&pause=1200&color=57F287&center=true&vCenter=true&width=750&lines=AI+Assistant+with+GPT-4o-mini;Deezer+Music+%2B+24%2F7+Radio;Slash+Commands+Only;Auto-Moderation+%26+Anti-Spam;XP+%2F+Leveling+System;Memes+Autom%C3%A1ticos;181+Tests+%2B+Ruff+Lint+%2B+CI" alt="Typing SVG" />
+<img src="https://readme-typing-svg.demolab.com?font=Fira+Code&size=20&pause=1200&color=57F287&center=true&vCenter=true&width=750&lines=AI+Assistant+with+GPT-4o-mini;Deezer+Music+%2B+24%2F7+Radio;Slash+Commands+Only;Auto-Moderation+%26+Anti-Spam;XP+%2F+Leveling+System;Memes+Autom%C3%A1ticos;220+Tests+%2B+Ruff+Lint+%2B+CI" alt="Typing SVG" />
 
 <br>
 
@@ -68,7 +68,7 @@ Es un "centro de operaciones" para tu servidor:
 - 🎮 **6 roles de juego autoasignables** + categorías y canales por juego.
 - 🤖 **Asistente de IA** (GPT-4o-mini) que entiende lenguaje natural y ejecuta herramientas.
 
-**39 comandos slash · 181 tests · CI con secret scanning** — un proyecto open source cuidado y seguro.
+**40 comandos slash · 220 tests · CI con secret scanning** — un proyecto open source cuidado y seguro.
 
 ### Misión
 
@@ -153,7 +153,7 @@ flowchart LR
     subgraph S5["⚙️ INFRAESTRUCTURA"]
         M13["database.py<br/>SQLite async + backups"]
         M14["permissions.py<br/>6 niveles + rate limit"]
-        M15["CI + 181 tests<br/>ruff + pyright"]
+        M15["CI + 220 tests<br/>ruff + pyright"]
     end
 
     M1 --> M2
@@ -267,7 +267,7 @@ Level role rewards
 
 ### 🔧 Server Tools
 
-`/deploy` — Rebuild structure<br>
+`/deploy` — Complete missing structure<br>
 `/server-map` — Full map<br>
 `/meme <1-3>` — Top memes<br>
 `/guia` — Interactive guide<br>
@@ -292,7 +292,7 @@ Confirmation cards
 ### 🧪 CI & Tests
 
 GitHub Actions on every push<br>
-181 pytest tests<br>
+220 pytest tests<br>
 Ruff lint (E/F/W)<br>
 pyright type checking<br>
 Coverage report<br>
@@ -375,7 +375,7 @@ graph TB
 
     subgraph QA ["🧪 QA"]
         CI["GitHub Actions"]
-        PY["pytest (181)"]
+        PY["pytest (220)"]
         RU["ruff"]
         PY2["pyright"]
     end
@@ -513,11 +513,12 @@ sequenceDiagram
 
 | Comando | Descripción |
 |---------|-------------|
-| `/deploy` | Reconstruir 6 categorías + ~20 canales |
+| `/deploy` | Completar categorías, roles y canales faltantes conservando los existentes |
 | `/nuke-all` | Destruir todo y reconstruir desde cero (con confirmación) |
 | `/server-map` | Mapa completo del servidor |
 | `/restart-bot` | Reinicio remoto |
-| `/repostroles` | Repost menús de selección de roles |
+| `/repostroles` | Repost menús de selección de roles (solo propietario) |
+| `/staffrole rol nivel` | Vincular o quitar permisos de un rol por ID (solo propietario) |
 | `/xplb` | Reinicializar base de datos |
 | `/ticketpanel` | Publicar panel de tickets (ADMIN) |
 | `/musiconly` | Canal de radio solo-escuchar (miembros sin micrófono ni chat) |
@@ -540,7 +541,7 @@ Cada comando del bot con su ruta exacta en el código, para verificar de forma �
 | `/poll` `/giveaway` `/remind` | Todos / MOD+ | [`src/cogs/community.py`](src/cogs/community.py) |
 | `/rank` `/top` `/xplb` | Todos / Owner | [`src/cogs/levels.py`](src/cogs/levels.py) |
 | `/guia` `/reglas` `/comandos` `/ping` | Todos | [`src/cogs/info.py`](src/cogs/info.py) |
-| `/deploy` `/server-map` `/restart-bot` `/repostroles` | Owner | [`src/cogs/setup.py`](src/cogs/setup.py) |
+| `/deploy` `/server-map` `/restart-bot` `/repostroles` `/staffrole` | Owner | [`src/cogs/setup.py`](src/cogs/setup.py) |
 | Mencionar al bot (`@OmniBot ...`) | Todos | [`src/cogs/assistant.py`](src/cogs/assistant.py) |
 
 ### Herramientas de IA (function calling)
@@ -565,7 +566,7 @@ Cada comando del bot con su ruta exacta en el código, para verificar de forma �
 ## Seguridad
 
 > [!IMPORTANT]
-> Post-auditoría completa (Agosto 2026), el bot tiene blindaje total de secrets y validación de inputs.
+> Los controles de permisos, validación y recuperación se verifican con pruebas automatizadas; revisa la configuración de tu servidor antes de producción.
 
 | Medida | Estado | Detalle |
 |--------|--------|---------|
@@ -576,7 +577,19 @@ Cada comando del bot con su ruta exacta en el código, para verificar de forma �
 | Rate limiting | ✅ | Cooldowns por usuario con check+increment atómico |
 | Ban/Kick hierarchy | ✅ | No se puede sancionar a roles iguales o superiores |
 | Health check FastAPI | ✅ | `/health` en :8080, `HEALTH_CHECK_PORT` configurable |
-| CI en cada push | ✅ | Sintaxis + imports + ruff + pyright + 181 tests antes de cualquier merge |
+| CI en cada push | ✅ | Sintaxis + imports + ruff + pyright + 220 tests antes de cualquier merge |
+
+### Permisos, migración y recuperación
+
+El propietario se reconoce por `guild.owner_id`; el permiso nativo de administrador concede ADMIN. Los demás niveles usan IDs de roles guardados en SQLite. En el primer arranque se importan los roles conocidos por nombre una única vez; después, renombrar un rol no cambia sus permisos. El propietario puede usar `/staffrole rol nivel` para asignar DJ, VIP, MOD o ADMIN, o quitar el vínculo. Ningún rol concede OWNER. La moderación manual y por IA verifica los permisos de Discord y la jerarquía del solicitante y del bot; las confirmaciones muestran y fijan el objetivo, canal, cantidad y duración, y vuelven a comprobar la autorización al ejecutar.
+
+XP, advertencias, registros, tickets, recordatorios, memes y memoria de conversación se separan por servidor. Al actualizar una base antigua, se crea `data/backups/pre-guild-migration-*.db` antes de la migración del esquema. Tickets y recordatorios se asignan por el canal de origen. Los otros registros antiguos se asignan automáticamente cuando el bot está en un único servidor; con varios, configura `LEGACY_GUILD_ID` con el ID del servidor original antes del arranque. Sin esa configuración permanecen conservados bajo `guild_id=0`, sin mostrarse en los servidores. No elimines el volumen persistente al actualizar.
+
+`/deploy` conserva canales, historial y permisos existentes; crea únicamente la estructura faltante. `/nuke-all` sigue siendo una operación destructiva separada con confirmación del propietario. Lockdown guarda las sobrescrituras que modifica y permite restaurarlas después de un reinicio.
+
+El cierre de tickets descarga todo el historial y los adjuntos a un ZIP en `data/transcripts/<guild_id>/`, registra su SHA-256 y publica el archivo en un canal privado de registros. Si supera el límite de Discord, conserva el ZIP en el volumen e informa de ello. Si falla el archivado o el registro, el canal permanece abierto. Los botones de tickets siguen funcionando tras reiniciar.
+
+Los sorteos guardan los ganadores antes de anunciar el resultado. Sorteos y recordatorios fallidos conservan su estado y reintentan a los 60 segundos. Las entregas incorporan un identificador que se busca en el historial para recuperar envíos realizados antes de una interrupción, sin repetirlos mientras el comprobante siga disponible. El bot necesita leer el historial y enviar mensajes/embeds en esos canales. La CI considera cualquier timeout una ejecución fallida.
 
 ### Variables de Entorno (Dokploy)
 
@@ -607,10 +620,12 @@ MEME_TIMEZONE=America/Argentina/Buenos_Aires
 
 # 🗄️ Base de datos (volumen persistente)
 OMNIBOT_DB_DIR=/app/data
+LEGACY_GUILD_ID=0
 ```
 
 | Variable | Default | Descripción |
 |----------|---------|-------------|
+| `LEGACY_GUILD_ID` | `0` | Servidor de origen de datos antiguos sin guild_id; con varios servidores deben asignarse explícitamente |
 | `DISCORD_TOKEN` | *(requerido)* | Token del bot de Discord |
 | `OPENROUTER_API_KEY` | *(vacío)* | Si está vacío, el bot usa modo básico (rule-based) |
 | `LAVALINK_URI` | `http://127.0.0.1:2333` | URI del nodo Lavalink |
@@ -741,7 +756,7 @@ python -m src.main
 ### CI & Tests
 
 ```bash
-# Correr los tests (181)
+# Correr los tests (220)
 uv run pytest -v
 
 # Lint con ruff
@@ -915,7 +930,7 @@ omni-bot/
 │   │   └── info.py              # Server stats, user info
 │   └── web/
 │       └── app.py               # FastAPI health check (/health, /api/status)
-├── 🧪 tests/                    # 181 tests pytest
+├── 🧪 tests/                    # 220 tests pytest
 ├── 📋 .application.yml.example  # Plantilla de config Lavalink v4 (placeholders a env)
 ├── 📄 Dockerfile                # Build alternativo (python:3.12-slim)
 ├── 🔧 nixpacks.toml             # Build + Lavalink + FastAPI health check
@@ -959,7 +974,7 @@ omni-bot/
 
 ### QA
 
-![pytest](https://img.shields.io/badge/pytest-181_tests-0A9EDC?style=for-the-badge&logo=pytest&logoColor=white)
+![pytest](https://img.shields.io/badge/pytest-220_tests-0A9EDC?style=for-the-badge&logo=pytest&logoColor=white)
 ![Ruff](https://img.shields.io/badge/Ruff-Lint-D7FF64?style=for-the-badge&logo=ruff&logoColor=black)
 ![Actions](https://img.shields.io/badge/GitHub_Actions-CI-2088FF?style=for-the-badge&logo=githubactions&logoColor=white)
 
@@ -987,7 +1002,7 @@ omni-bot/
 - [x] Auto Miembro on Join (DM dinámico)
 - [x] Security audit (env vars, validation, sanitization)
 - [x] Async database (asyncio.to_thread + indexes)
-- [x] GitHub Actions CI + 181 tests + ruff lint + pyright
+- [x] GitHub Actions CI + 220 tests + ruff lint + pyright
 - [x] Auto-radio state persistente (respeta `/autoradio off`)
 - [x] Reglas del servidor desde fuente única
 - [x] Sistema de tickets (modal + canal privado + transcript en #mod-logs)
