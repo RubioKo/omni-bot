@@ -579,6 +579,10 @@ Cada comando del bot con su ruta exacta en el código, para verificar de forma �
 | Health check FastAPI | ✅ | `/health` en :8080, `HEALTH_CHECK_PORT` configurable |
 | CI en cada push | ✅ | Sintaxis + imports + ruff + pyright + 220 tests antes de cualquier merge |
 
+### Actualizaciones de dependencias
+
+`uv.lock` es la fuente de versiones reproducibles. Al modificar dependencias, actualiza el lock y regenera `requirements.txt` con `uv export --frozen --no-dev -o requirements.txt`; los pins de `requirements-dev.txt` también deben coincidir. La CI comprueba que el lock esté vigente y que el export coincida. Pydantic y pydantic-core deben actualizarse como pareja según sus dependencias exactas, no con un bump aislado del core.
+
 ### Permisos, migración y recuperación
 
 El propietario se reconoce por `guild.owner_id`; el permiso nativo de administrador concede ADMIN. Los demás niveles usan IDs de roles guardados en SQLite. En el primer arranque se importan los roles conocidos por nombre una única vez; después, renombrar un rol no cambia sus permisos. El propietario puede usar `/staffrole rol nivel` para asignar DJ, VIP, MOD o ADMIN, o quitar el vínculo. Ningún rol concede OWNER. La moderación manual y por IA verifica los permisos de Discord y la jerarquía del solicitante y del bot; las confirmaciones muestran y fijan el objetivo, canal, cantidad y duración, y vuelven a comprobar la autorización al ejecutar.
